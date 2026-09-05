@@ -1,0 +1,5 @@
+bin/
+web/weights.json
+data/*-ubyte
+data/*.gz
+*.o

@@ -1,0 +1,421 @@
+<title>Draw a Digit</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Handwritten digit recognition running entirely in the browser, using weights trained by a neural network written from scratch in C++.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --bg:#F2F1ED; --panel:#FFFFFF; --ink:#15161A; --dim:#5F6570;
+  --line:rgba(21,22,26,.13); --line-soft:rgba(21,22,26,.06);
+  --accent:#2F5D50; --accent-soft:rgba(47,93,80,.11);
+  --bar:#2F5D50; --bar-bg:rgba(21,22,26,.07);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1113; --panel:#171A1D; --ink:#E9E7E1; --dim:#969BA3;
+    --line:rgba(233,231,225,.14); --line-soft:rgba(233,231,225,.06);
+    --accent:#7FC0AC; --accent-soft:rgba(127,192,172,.14);
+    --bar:#7FC0AC; --bar-bg:rgba(233,231,225,.09);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1113; --panel:#171A1D; --ink:#E9E7E1; --dim:#969BA3;
+  --line:rgba(233,231,225,.14); --line-soft:rgba(233,231,225,.06);
+  --accent:#7FC0AC; --accent-soft:rgba(127,192,172,.14);
+  --bar:#7FC0AC; --bar-bg:rgba(233,231,225,.09);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+h1,h2,h3{margin:0; font-weight:600; text-wrap:balance}
+p{margin:0}
+
+.wrap{max-width:940px; margin-inline:auto; padding:clamp(24px,5vw,56px) clamp(18px,4vw,40px)}
+
+header{margin-bottom:clamp(24px,4vw,40px)}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--accent); margin-bottom:.7rem;
+}
+h1{font-size:clamp(1.7rem,4.5vw,2.5rem); letter-spacing:-.02em; line-height:1.12}
+header p{margin-top:.7rem; color:var(--dim); max-width:60ch}
+
+.grid{display:grid; gap:clamp(16px,3vw,24px)}
+@media (min-width:780px){.grid{grid-template-columns:minmax(0,320px) minmax(0,1fr); align-items:start}}
+
+.card{
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:10px; padding:clamp(16px,3vw,22px);
+}
+.card h2{
+  font-size:.72rem; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--dim); font-family:"IBM Plex Mono",monospace; font-weight:400;
+  margin-bottom:.9rem;
+}
+
+/* canvas */
+#pad{
+  width:100%; aspect-ratio:1; display:block; border-radius:8px;
+  background:#0B0C0E; cursor:crosshair; touch-action:none;
+  border:1px solid var(--line);
+}
+.pad-hint{
+  margin-top:.7rem; font-size:.78rem; color:var(--dim); text-align:center;
+  font-family:"IBM Plex Mono",monospace;
+}
+.controls{display:flex; gap:.5rem; margin-top:.9rem; flex-wrap:wrap}
+button{
+  font:inherit; font-size:.82rem; font-family:"IBM Plex Mono",monospace;
+  letter-spacing:.06em; padding:.55rem .9rem; border-radius:6px; cursor:pointer;
+  background:transparent; color:var(--ink); border:1px solid var(--line);
+  transition:border-color .2s,background .2s,color .2s;
+}
+button:hover{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--accent); border-color:var(--accent); color:var(--bg)}
+button.primary:hover{opacity:.9; color:var(--bg)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* prediction */
+.verdict{display:flex; align-items:baseline; gap:1rem; margin-bottom:1.1rem}
+.big{
+  font-family:"IBM Plex Mono",monospace; font-size:clamp(3rem,11vw,4.6rem);
+  line-height:1; font-weight:500; letter-spacing:-.04em; min-width:1.2em;
+}
+.verdict .meta{color:var(--dim); font-size:.86rem}
+.verdict .meta b{color:var(--ink); font-weight:600}
+
+.bars{display:flex; flex-direction:column; gap:.34rem}
+.row{display:grid; grid-template-columns:1.4rem 1fr 3.4rem; align-items:center; gap:.6rem}
+.row .d{font-family:"IBM Plex Mono",monospace; font-size:.84rem; color:var(--dim)}
+.row .track{height:9px; background:var(--bar-bg); border-radius:5px; overflow:hidden}
+.row .fill{height:100%; width:0; background:var(--bar); border-radius:5px; transition:width .18s ease-out}
+.row .pct{
+  font-family:"IBM Plex Mono",monospace; font-size:.76rem; color:var(--dim);
+  text-align:right; font-variant-numeric:tabular-nums;
+}
+.row[data-top="1"] .d{color:var(--ink); font-weight:500}
+.row[data-top="1"] .pct{color:var(--ink)}
+
+/* input preview */
+.preview{display:flex; align-items:center; gap:1rem; margin-top:1.2rem; padding-top:1.1rem; border-top:1px solid var(--line-soft)}
+#seen{
+  width:84px; height:84px; image-rendering:pixelated; border-radius:6px;
+  border:1px solid var(--line); background:#0B0C0E; flex:none;
+}
+.preview p{font-size:.78rem; color:var(--dim); font-family:"IBM Plex Mono",monospace; line-height:1.55}
+
+/* samples */
+.samples{display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.9rem}
+.samples canvas{
+  width:38px; height:38px; image-rendering:pixelated; border-radius:5px;
+  border:1px solid var(--line); background:#0B0C0E; cursor:pointer;
+  transition:border-color .2s, transform .15s;
+}
+.samples canvas:hover{border-color:var(--accent); transform:translateY(-2px)}
+
+footer{
+  margin-top:clamp(28px,5vw,44px); padding-top:1.2rem; border-top:1px solid var(--line);
+  display:flex; flex-wrap:wrap; gap:.6rem 1.6rem; justify-content:space-between;
+  font-size:.78rem; color:var(--dim); font-family:"IBM Plex Mono",monospace;
+}
+footer a{color:var(--accent); text-decoration:none}
+footer a:hover{text-decoration:underline}
+.facts{display:flex; flex-wrap:wrap; gap:.4rem 1.4rem}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Neural network from scratch · C++</p>
+    <h1>Draw a digit.</h1>
+    <p>
+      Every weight below was trained by a neural network I wrote from scratch in
+      C++ — my own matrix class, my own backpropagation, no machine learning
+      library. It scored <b>97.63%</b> on the MNIST test set. The recognition
+      here runs entirely in your browser; nothing is sent anywhere.
+    </p>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Input</h2>
+      <canvas id="pad" width="280" height="280"></canvas>
+      <p class="pad-hint">Draw a digit from 0 to 9</p>
+      <div class="controls">
+        <button id="clear" class="primary" type="button">Clear</button>
+        <button id="theme" type="button">Theme</button>
+      </div>
+      <div class="samples" id="samples" title="Real MNIST test digits"></div>
+    </div>
+
+    <div class="card">
+      <h2>Prediction</h2>
+      <div class="verdict">
+        <span class="big mono" id="guess">—</span>
+        <span class="meta" id="conf">Draw something, or pick a sample below the canvas.</span>
+      </div>
+      <div class="bars" id="bars"></div>
+
+      <div class="preview">
+        <canvas id="seen" width="28" height="28"></canvas>
+        <p>
+          What the network actually sees.<br>
+          Cropped, scaled to 20&times;20, then centred<br>
+          by centre of mass in a 28&times;28 field.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="facts">
+      <span>784 &rarr; 64 &rarr; 10</span>
+      <span>50,890 parameters</span>
+      <span>97.63% test accuracy</span>
+    </div>
+    <span>Nikos Patsaris &middot; <a href="https://github.com/nikospatsaris">github.com/nikospatsaris</a></span>
+  </footer>
+</div>
+
+<script>
+// Weights exported by the C++ trainer:  ./bin/train --export web/weights.json
+const MODEL = /*__WEIGHTS__*/null;
+const SAMPLES = /*__SAMPLES__*/[];
+
+// ── inference ────────────────────────────────────────────────────────────
+// The same forward pass as the C++ code: dense layer, ReLU on the hidden
+// layers, softmax at the output.
+function predict(input) {
+  let a = input;
+  for (const layer of MODEL.layers) {
+    const { in: nin, out: nout, W, b, activation } = layer;
+    const z = new Float64Array(nout);
+    for (let j = 0; j < nout; j++) z[j] = b[j];
+    for (let i = 0; i < nin; i++) {
+      const ai = a[i];
+      if (ai === 0) continue;      // ReLU makes most of these zero
+      const row = i * nout;
+      for (let j = 0; j < nout; j++) z[j] += ai * W[row + j];
+    }
+    if (activation === "relu") {
+      for (let j = 0; j < nout; j++) if (z[j] < 0) z[j] = 0;
+      a = z;
+    } else {
+      // Softmax, shifted by the max for numerical stability.
+      let m = -Infinity;
+      for (let j = 0; j < nout; j++) if (z[j] > m) m = z[j];
+      let sum = 0;
+      for (let j = 0; j < nout; j++) { z[j] = Math.exp(z[j] - m); sum += z[j]; }
+      for (let j = 0; j < nout; j++) z[j] /= sum;
+      a = z;
+    }
+  }
+  return a;
+}
+
+// ── preprocessing ────────────────────────────────────────────────────────
+// MNIST digits are not raw drawings. Each one was cropped to its ink, scaled
+// so the longer side is 20px, and placed in a 28x28 field with its centre of
+// mass at the middle. A network trained on that will do badly on anything
+// else, so the same treatment is applied here.
+function toMnist(sourceCanvas) {
+  const S = sourceCanvas.width;
+  const px = sourceCanvas.getContext("2d").getImageData(0, 0, S, S).data;
+
+  // Ink is drawn white on black, so the red channel is the intensity.
+  let minX = S, minY = S, maxX = -1, maxY = -1;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      if (px[(y * S + x) * 4] > 12) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;  // nothing drawn
+
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  const scale = 20 / Math.max(w, h);
+  const sw = Math.max(1, Math.round(w * scale));
+  const sh = Math.max(1, Math.round(h * scale));
+
+  // Scale the cropped ink into a 20x20 box.
+  const box = document.createElement("canvas");
+  box.width = sw; box.height = sh;
+  const bctx = box.getContext("2d");
+  bctx.imageSmoothingEnabled = true;
+  bctx.drawImage(sourceCanvas, minX, minY, w, h, 0, 0, sw, sh);
+
+  // Centre of mass of the scaled ink.
+  const bd = bctx.getImageData(0, 0, sw, sh).data;
+  let mass = 0, cx = 0, cy = 0;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const v = bd[(y * sw + x) * 4];
+      mass += v; cx += x * v; cy += y * v;
+    }
+  }
+  if (mass === 0) return null;
+  cx /= mass; cy /= mass;
+
+  // Paste so that the centre of mass lands on the centre of the 28x28 field.
+  const out = document.createElement("canvas");
+  out.width = 28; out.height = 28;
+  const octx = out.getContext("2d");
+  octx.fillStyle = "#000";
+  octx.fillRect(0, 0, 28, 28);
+  octx.drawImage(box, Math.round(14 - cx), Math.round(14 - cy));
+
+  const od = octx.getImageData(0, 0, 28, 28).data;
+  const vec = new Float64Array(784);
+  for (let i = 0; i < 784; i++) vec[i] = od[i * 4] / 255;
+  return vec;
+}
+
+// ── UI ───────────────────────────────────────────────────────────────────
+const pad = document.getElementById("pad");
+const ctx = pad.getContext("2d", { willReadFrequently: true });
+const seen = document.getElementById("seen");
+const seenCtx = seen.getContext("2d");
+const guess = document.getElementById("guess");
+const conf = document.getElementById("conf");
+const bars = document.getElementById("bars");
+
+const rows = [];
+for (let d = 0; d < 10; d++) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML =
+    '<span class="d">' + d + '</span>' +
+    '<span class="track"><span class="fill"></span></span>' +
+    '<span class="pct">0.0%</span>';
+  bars.appendChild(row);
+  rows.push({ row, fill: row.querySelector(".fill"), pct: row.querySelector(".pct") });
+}
+
+function clearPad() {
+  ctx.fillStyle = "#0B0C0E";
+  ctx.fillRect(0, 0, pad.width, pad.height);
+  seenCtx.fillStyle = "#0B0C0E";
+  seenCtx.fillRect(0, 0, 28, 28);
+  guess.textContent = "—";
+  conf.textContent = "Draw something, or pick a sample below the canvas.";
+  rows.forEach(r => { r.fill.style.width = "0%"; r.pct.textContent = "0.0%"; r.row.removeAttribute("data-top"); });
+}
+
+function show(probs, vec) {
+  let best = 0;
+  for (let i = 1; i < 10; i++) if (probs[i] > probs[best]) best = i;
+  guess.textContent = String(best);
+  conf.innerHTML = "<b>" + (probs[best] * 100).toFixed(1) + "%</b> confident";
+
+  rows.forEach((r, d) => {
+    r.fill.style.width = (probs[d] * 100).toFixed(2) + "%";
+    r.pct.textContent = (probs[d] * 100).toFixed(1) + "%";
+    if (d === best) r.row.setAttribute("data-top", "1");
+    else r.row.removeAttribute("data-top");
+  });
+
+  const img = seenCtx.createImageData(28, 28);
+  for (let i = 0; i < 784; i++) {
+    const v = Math.round(vec[i] * 255);
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  seenCtx.putImageData(img, 0, 0);
+}
+
+function run() {
+  const vec = toMnist(pad);
+  if (!vec) return;
+  show(predict(vec), vec);
+}
+
+// drawing
+let drawing = false;
+function pos(e) {
+  const r = pad.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * (pad.width / r.width),
+    y: (e.clientY - r.top) * (pad.height / r.height),
+  };
+}
+function start(e) {
+  drawing = true;
+  const p = pos(e);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 20;          // roughly the stroke width MNIST digits have
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(p.x + 0.01, p.y);  // a single tap still leaves a dot
+  ctx.stroke();
+  e.preventDefault();
+}
+function move(e) {
+  if (!drawing) return;
+  const p = pos(e);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  e.preventDefault();
+}
+function end() {
+  if (!drawing) return;
+  drawing = false;
+  run();
+}
+pad.addEventListener("pointerdown", start);
+pad.addEventListener("pointermove", move);
+window.addEventListener("pointerup", end);
+pad.addEventListener("pointerleave", () => { if (drawing) run(); });
+
+document.getElementById("clear").addEventListener("click", clearPad);
+
+document.getElementById("theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute("data-theme")
+    ? root.getAttribute("data-theme") === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+});
+
+// sample digits from the real MNIST test set
+const sampleBox = document.getElementById("samples");
+SAMPLES.forEach(s => {
+  const c = document.createElement("canvas");
+  c.width = 28; c.height = 28;
+  c.title = "MNIST test digit, labelled " + s.label;
+  const cx2 = c.getContext("2d");
+  const img = cx2.createImageData(28, 28);
+  for (let i = 0; i < 784; i++) {
+    const v = s.px[i];
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  cx2.putImageData(img, 0, 0);
+  c.addEventListener("click", () => {
+    // Draw the sample onto the pad so the same pipeline runs on it.
+    ctx.fillStyle = "#0B0C0E";
+    ctx.fillRect(0, 0, pad.width, pad.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(c, 0, 0, pad.width, pad.height);
+    run();
+  });
+  sampleBox.appendChild(c);
+});
+
+// Exposed so the pipeline can be tested against the real test set.
+window.__nn = { predict, toMnist };
+
+clearPad();
+</script>
